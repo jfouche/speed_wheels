@@ -20,6 +20,10 @@ fn main() {
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugin(RapierDebugRenderPlugin::default())
         .init_resource::<CarConfig>()
+        .insert_resource(RapierConfiguration {
+            gravity: Vect::Y * -0.5,
+            ..default()
+        })
         .add_startup_system(spawn_camera)
         .add_startup_system(spawn_light)
         .add_startup_system(spawn_ground)
@@ -48,16 +52,20 @@ impl<'a> CarWheel<'a> {
     }
 
     fn pos(&self) -> Vec3 {
+        let offset = 0.5;
+        let w = self.car.width / 2.;
+        let l = self.car.length / 2.;
         let (x, z) = match self.wheel {
-            Wheel::FrontLeft => (self.car.length / 2., self.car.width / 2.),
-            Wheel::FrontRight => (self.car.length / 2., -self.car.width / 2.),
-            Wheel::RearLeft => (-self.car.length / 2., self.car.width / 2.),
-            Wheel::RearRight => (-self.car.length / 2., -self.car.width / 2.),
+            Wheel::FrontLeft => (-w - offset, -l + offset),
+            Wheel::FrontRight => (w + offset, -l + offset),
+            Wheel::RearLeft => (-w - offset, l - offset),
+            Wheel::RearRight => (w + offset, l - offset),
         };
-        Vec3::new(x, self.car.width / 2., z)
+        Vec3::new(x, self.car.height / 2., z)
     }
 }
 
+///
 #[derive(Resource)]
 struct CarConfig {
     length: f32,
@@ -72,10 +80,10 @@ struct CarConfig {
 impl Default for CarConfig {
     fn default() -> Self {
         CarConfig {
-            length: 2.0,
+            length: 3.0,
             width: 1.2,
             height: 1.0,
-            wheel_diameter: 2.0,
+            wheel_diameter: 1.3,
             wheel_width: 0.3,
             // axle_size: 0.05,
             // axle_length: 0.1,
@@ -84,8 +92,12 @@ impl Default for CarConfig {
 }
 
 impl CarConfig {
+    ///
+    ///
+    ///
+    ///
     fn car_box(&self) -> shape::Box {
-        shape::Box::new(self.length, self.height, self.width)
+        shape::Box::new(self.width, self.height, self.length)
     }
 
     fn collider(&self) -> Collider {
@@ -108,7 +120,7 @@ impl CarConfig {
 }
 
 fn spawn_camera(mut commands: Commands) {
-    let translation = Vec3::new(-8., 10., 7.0);
+    let translation = Vec3::new(0., 10., 18.0);
     commands.spawn(Camera3dBundle {
         transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
@@ -133,19 +145,21 @@ fn spawn_ground(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands
-        .spawn((
-            Name::new("Ground"),
-            PbrBundle {
-                mesh: meshes.add(shape::Plane::from_size(50.0).into()),
-                material: materials.add(Color::SEA_GREEN.into()),
-                ..default()
-            },
-            Transform::from,
-        ))
-        .insert((RigidBody::Fixed, Collider::cuboid(25., 0.1, 25.)));
+    commands.spawn((
+        Name::new("Ground"),
+        // BODY
+        // PbrBundle {
+        //     mesh: meshes.add(shape::Plane::from_size(50.0).into()),
+        //     material: materials.add(Color::SEA_GREEN.into()),
+        //     ..default()
+        // },
+        // PHYSICS
+        RigidBody::Fixed,
+        Collider::cuboid(25., 0.1, 25.),
+    ));
 }
 
+///       
 ///
 ///
 fn spawn_car(
@@ -154,56 +168,90 @@ fn spawn_car(
     mut materials: ResMut<Assets<StandardMaterial>>,
     car: Res<CarConfig>,
 ) {
-    let body_bundle = (
+    let bundle = (
         Name::new("Car"),
+        // BODY
         PbrBundle {
             mesh: meshes.add(car.car_box().into()),
-            material: materials.add(Color::SILVER.into()),
+            material: materials.add(Color::NONE.into()),
             transform: Transform::from_xyz(0., 1., 0.),
             ..default()
         },
+        // PHYSICS
+        RigidBody::Dynamic,
+        car.collider(),
     );
 
-    let physics_bundle = (RigidBody::Dynamic, car.collider());
-
-    commands
-        .spawn((body_bundle, physics_bundle))
-        .with_children(|parent| {
-            // spawn wheels
-            let wheel_handle = meshes.add(car.wheel_shape().into());
-            spawn_wheel(parent, CarWheel::new(Wheel::FrontLeft, &car), &wheel_handle);
-            spawn_wheel(
-                parent,
-                CarWheel::new(Wheel::FrontRight, &car),
-                &wheel_handle,
-            );
-            spawn_wheel(parent, CarWheel::new(Wheel::RearLeft, &car), &wheel_handle);
-            spawn_wheel(parent, CarWheel::new(Wheel::RearRight, &car), &wheel_handle);
-        });
+    commands.spawn(bundle).with_children(|parent| {
+        // spawn wheels
+        let wheel_handle = meshes.add(car.wheel_shape().into());
+        let wheel_material = materials.add(Color::DARK_GRAY.into());
+        spawn_wheel(
+            parent,
+            CarWheel::new(Wheel::FrontLeft, &car),
+            &wheel_handle,
+            &wheel_material,
+        );
+        // spawn_wheel(
+        //     parent,
+        //     CarWheel::new(Wheel::FrontRight, &car),
+        //     &wheel_handle,
+        //     &wheel_material,
+        // );
+        // spawn_wheel(
+        //     parent,
+        //     CarWheel::new(Wheel::RearLeft, &car),
+        //     &wheel_handle,
+        //     &wheel_material,
+        // );
+        // spawn_wheel(
+        //     parent,
+        //     CarWheel::new(Wheel::RearRight, &car),
+        //     &wheel_handle,
+        //     &wheel_material,
+        // );
+    });
 }
 
-fn spawn_wheel(parent: &mut ChildBuilder, car_wheel: CarWheel, wheel_handle: &Handle<Mesh>) {
+fn spawn_wheel(
+    parent: &mut ChildBuilder,
+    car_wheel: CarWheel,
+    mesh: &Handle<Mesh>,
+    material: &Handle<StandardMaterial>,
+) {
     let name = format!("Wheel {:?}", car_wheel.wheel);
     let pos = car_wheel.pos();
-    let joint_builder = RevoluteJointBuilder::new(Vec3::X).local_anchor2(pos);
+    warn!("car weel {:?} : {}", car_wheel.wheel, pos);
+    let joint_builder = RevoluteJointBuilder::new(Vec3::X)
+        .local_anchor1(pos)
+        .local_anchor2(pos);
     let mut transform = Transform::from_translation(pos);
-    transform.rotate_axis(Vec3::X, PI / 2.0);
+    match car_wheel.wheel {
+        Wheel::FrontLeft | Wheel::RearLeft => transform.rotate_axis(Vec3::Z, PI / 2.0),
+        Wheel::FrontRight | Wheel::RearRight => transform.rotate_axis(Vec3::Z, -PI / 2.0),
+    }
 
-    let body_bundle = (
+    let bundle = (
         Name::new(name),
+        // BODY
         PbrBundle {
-            mesh: wheel_handle.clone(),
+            mesh: mesh.clone(),
+            material: material.clone(),
             transform,
             ..default()
         },
-    );
-
-    let physic_bundle = (
+        // PHYSICS
         RigidBody::Dynamic,
         car_wheel.car.wheel_collider(),
-        ImpulseJoint::new(parent.parent_entity(), joint_builder),
+        // ImpulseJoint::new(parent.parent_entity(), joint_builder),
     );
-    parent.spawn((body_bundle, physic_bundle));
+
+    let parent_entity = parent.parent_entity();
+    let mut wheel_entity = parent.spawn(bundle);
+    wheel_entity.insert((
+        RigidBody::Dynamic,
+        ImpulseJoint::new(parent_entity, joint_builder),
+    ));
 }
 
 // fn axle_bundle(car: &CarConfig, wheel: Wheel, wheel_handle: &Handle<Mesh>) -> impl Bundle {
